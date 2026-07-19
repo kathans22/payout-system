@@ -2,10 +2,10 @@ const { MongoMemoryReplSet } = require('mongodb-memory-server');
 const mongoose = require('mongoose');
 
 // Import models to register schemas and ensure index creation
-const Merchant = require('../src/models/merchant.model');
+const User = require('../src/models/user.model');
+const Brand = require('../src/models/brand.model');
 const Sale = require('../src/models/sale.model');
 const Payout = require('../src/models/payout.model');
-const Adjustment = require('../src/models/adjustment.model');
 const LedgerEntry = require('../src/models/ledger.model');
 
 let mongoServer;
@@ -29,10 +29,10 @@ beforeAll(async () => {
 
   // Build all indexes upfront to prevent transaction write conflicts on dynamic index creation
   await Promise.all([
-    Merchant.ensureIndexes(),
+    User.ensureIndexes(),
+    Brand.ensureIndexes(),
     Sale.ensureIndexes(),
     Payout.ensureIndexes(),
-    Adjustment.ensureIndexes(),
     LedgerEntry.ensureIndexes()
   ]);
 });

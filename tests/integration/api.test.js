@@ -1,121 +1,130 @@
 const request = require('supertest');
 const app = require('../../src/app');
-const Merchant = require('../../src/models/merchant.model');
+const User = require('../../src/models/user.model');
+const Brand = require('../../src/models/brand.model');
 const Sale = require('../../src/models/sale.model');
 const Payout = require('../../src/models/payout.model');
+const LedgerEntry = require('../../src/models/ledger.model');
 
 describe('Payout System REST APIs', () => {
-  let merchantId;
+  let userId;
+  let brandId;
 
   beforeEach(async () => {
-    // Create a fresh merchant before each test
-    const res = await request(app)
-      .post('/api/merchants')
-      .send({ name: 'API Test Merchant', email: 'apitest@merchant.com' });
-    merchantId = res.body.id;
+    // Create a fresh user and brand before each test
+    const userRes = await request(app)
+      .post('/api/users')
+      .send({ name: 'API Test User', email: 'apitest@user.com' });
+    userId = userRes.body.id;
+
+    const brandRes = await request(app)
+      .post('/api/brands')
+      .send({ name: 'BrandAcme' });
+    brandId = brandRes.body.id;
   });
 
-  it('POST /api/merchants should create a new merchant', async () => {
+  it('POST /api/users should create a new user', async () => {
     const res = await request(app)
-      .post('/api/merchants')
-      .send({ name: 'Another Merchant', email: 'another@merchant.com' });
+      .post('/api/users')
+      .send({ name: 'Another User', email: 'another@user.com' });
 
     expect(res.statusCode).toBe(201);
-    expect(res.body.name).toBe('Another Merchant');
+    expect(res.body.name).toBe('Another User');
     expect(res.body.id).toBeDefined();
   });
 
-  it('GET /api/merchants/:id should retrieve merchant details', async () => {
+  it('POST /api/brands should create a new brand', async () => {
     const res = await request(app)
-      .get(`/api/merchants/${merchantId}`);
+      .post('/api/brands')
+      .send({ name: 'BrandAcme2' });
 
-    expect(res.statusCode).toBe(200);
-    expect(res.body.id).toBe(merchantId);
-    expect(res.body.name).toBe('API Test Merchant');
+    expect(res.statusCode).toBe(201);
+    expect(res.body.name).toBe('BrandAcme2');
+    expect(res.body.id).toBeDefined();
   });
 
   it('POST /api/sales should create a pending sale', async () => {
     const res = await request(app)
       .post('/api/sales')
-      .send({ merchantId, amount: 50000 }); // $500
+      .send({ userId, brandId, earningPaise: 12000 });
 
     expect(res.statusCode).toBe(201);
-    expect(res.body.amount).toBe(50000);
-    expect(res.body.status).toBe('PENDING');
+    expect(res.body.earningINR).toBe(120.00);
+    expect(res.body.status).toBe('pending');
   });
 
-  it('POST /api/advances/process should trigger the background job and pay 10% advance', async () => {
+  it('POST /api/jobs/advance-payout should pay 10% advance', async () => {
     // 1. Post a pending sale
-    const saleRes = await request(app)
+    await request(app)
       .post('/api/sales')
-      .send({ merchantId, amount: 50000 });
+      .send({ userId, brandId, earningPaise: 12000 });
 
-    // 2. Trigger background advances
+    // 2. Trigger advance job
     const processRes = await request(app)
-      .post('/api/advances/process');
+      .post('/api/jobs/advance-payout');
 
     expect(processRes.statusCode).toBe(200);
     expect(processRes.body.processedCount).toBe(1);
-    expect(processRes.body.totalAdvancePaid).toBe(5000); // 10% of 50000 = 5000 cents
+    expect(processRes.body.totalAdvancePaidINR).toBe(12.00);
 
-    // Verify merchant available balance increased by $50 (5000 cents)
-    const merchantRes = await request(app).get(`/api/merchants/${merchantId}`);
-    expect(merchantRes.body.availableBalance).toBe(5000);
+    // Verify balance
+    const balRes = await request(app).get(`/api/users/${userId}/balance`);
+    expect(balRes.body.balanceINR).toBe(12.00);
   });
 
-  it('POST /api/sales/:id/reconcile should reconcile a sale (APPROVED)', async () => {
+  it('POST /api/sales/:id/reconcile should reconcile a sale approved at ₹68', async () => {
     // 1. Create sale & process advance
     const saleRes = await request(app)
       .post('/api/sales')
-      .send({ merchantId, amount: 50000 });
+      .send({ userId, brandId, earningPaise: 12000 });
     const saleId = saleRes.body.saleId;
-    await request(app).post('/api/advances/process');
+    await request(app).post('/api/jobs/advance-payout');
 
-    // 2. Reconcile sale
+    // 2. Reconcile sale to ₹68 (6800 paise)
     const reconRes = await request(app)
       .post(`/api/sales/${saleId}/reconcile`)
-      .send({ status: 'APPROVED' });
+      .send({ status: 'approved', finalEarningPaise: 6800 });
 
     expect(reconRes.statusCode).toBe(200);
-    expect(reconRes.body.status).toBe('APPROVED');
-    expect(reconRes.body.remainingEarned).toBe(45000); // 90% of 50000 = 45000 cents
+    expect(reconRes.body.status).toBe('approved');
+    expect(reconRes.body.remainingPaidINR).toBe(56.00); // 68 - 12 = 56
 
-    // Merchant balance: $50 advance + $450 remaining = $500 (50000 cents)
-    const merchantRes = await request(app).get(`/api/merchants/${merchantId}`);
-    expect(merchantRes.body.availableBalance).toBe(50000);
+    // Verify balance
+    const balRes = await request(app).get(`/api/users/${userId}/balance`);
+    expect(balRes.body.balanceINR).toBe(68.00);
   });
 
   it('POST /api/payouts/:id/fail should fail a payout and refund balance', async () => {
-    // 1. Give merchant some balance
+    // 1. Give user some balance
     const saleRes = await request(app)
       .post('/api/sales')
-      .send({ merchantId, amount: 50000 });
+      .send({ userId, brandId, earningPaise: 50000 });
     const saleId = saleRes.body.saleId;
-    await request(app).post('/api/advances/process');
-    await request(app).post(`/api/sales/${saleId}/reconcile`).send({ status: 'APPROVED' }); // balance = 50000 cents
+    await request(app).post('/api/jobs/advance-payout');
+    await request(app).post(`/api/sales/${saleId}/reconcile`).send({ status: 'approved' }); // balance = 500.00
 
-    // 2. Request payout
+    // 2. Request payout withdrawal
     const payoutRes = await request(app)
-      .post('/api/payouts')
-      .send({ merchantId, amount: 20000 }); // withdraw 20000 cents ($200)
+      .post(`/api/users/${userId}/withdraw`)
+      .send({ amountPaise: 20000 }); // withdraw 20000 paise (₹200)
 
     expect(payoutRes.statusCode).toBe(201);
     const payoutId = payoutRes.body.payoutId;
 
-    // Merchant balance: 50000 - 20000 = 30000 cents ($300)
-    let merchantRes = await request(app).get(`/api/merchants/${merchantId}`);
-    expect(merchantRes.body.availableBalance).toBe(30000);
+    // Derived balance should be 300
+    let balRes = await request(app).get(`/api/users/${userId}/balance`);
+    expect(balRes.body.balanceINR).toBe(300.00);
 
     // 3. Mark payout failed
     const failRes = await request(app)
       .post(`/api/payouts/${payoutId}/fail`);
 
     expect(failRes.statusCode).toBe(200);
-    expect(failRes.body.status).toBe('FAILED');
-    expect(failRes.body.refundedAmount).toBe(20000);
+    expect(failRes.body.status).toBe('failed');
+    expect(failRes.body.refundedINR).toBe(200.00);
 
-    // Balance refunded to 50000 cents ($500)
-    merchantRes = await request(app).get(`/api/merchants/${merchantId}`);
-    expect(merchantRes.body.availableBalance).toBe(50000);
+    // Balance refunded to 500
+    balRes = await request(app).get(`/api/users/${userId}/balance`);
+    expect(balRes.body.balanceINR).toBe(500.00);
   });
 });
