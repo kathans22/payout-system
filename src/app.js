@@ -10,10 +10,21 @@ app.use('/api', routes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
-  console.error('API Error:', err);
   const status = err.status || 500;
+  const code = err.code || (status === 404 ? 'NOT_FOUND' : 'INTERNAL_SERVER_ERROR');
   const message = err.message || 'Internal Server Error';
-  res.status(status).json({ error: message });
+
+  // Set Retry-After header if specified
+  if (status === 429 && err.retryAfter !== undefined) {
+    res.setHeader('Retry-After', err.retryAfter);
+  }
+
+  res.status(status).json({
+    error: {
+      code,
+      message
+    }
+  });
 });
 
 module.exports = app;
