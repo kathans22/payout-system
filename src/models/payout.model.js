@@ -1,11 +1,17 @@
 const mongoose = require('mongoose');
 
 const payoutSchema = new mongoose.Schema({
-  merchantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true, index: true },
-  amount: { type: Number, required: true }, // in cents
-  status: { type: String, enum: ['PENDING', 'PAID', 'FAILED'], default: 'PENDING' },
-  previousLastWithdrawalAt: { type: Date, default: null },
-  createdAt: { type: Date, default: Date.now }
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  amountPaise: { type: Number, required: true },
+  status: { 
+    type: String, 
+    enum: ['initiated', 'completed', 'failed', 'cancelled'], 
+    default: 'initiated' 
+  },
+  initiatedAt: { type: Date, default: Date.now },
+  resolvedAt: { type: Date, default: null }
 });
+
+payoutSchema.index({ userId: 1, status: 1 });
 
 module.exports = mongoose.model('Payout', payoutSchema);

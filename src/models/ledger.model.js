@@ -1,12 +1,28 @@
 const mongoose = require('mongoose');
 
 const ledgerEntrySchema = new mongoose.Schema({
-  merchantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true, index: true },
-  amount: { type: Number, required: true }, // in cents (positive for credit, negative for debit)
-  type: { type: String, enum: ['CREDIT', 'DEBIT'], required: true },
-  category: { type: String, enum: ['ADVANCE_PAYOUT', 'RECONCILIATION', 'ADJUSTMENT', 'PAYOUT', 'PAYOUT_REVERT'], required: true },
-  referenceId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true }, // references Sale, Payout, etc.
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  saleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', default: null },
+  type: { 
+    type: String, 
+    enum: ['ADVANCE', 'FINAL_SETTLEMENT', 'ADJUSTMENT', 'WITHDRAWAL', 'REVERSAL'], 
+    required: true 
+  },
+  amountPaise: { type: Number, required: true },
+  referenceId: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
+
+// Idempotency compound partial index
+ledgerEntrySchema.index(
+  { saleId: 1, type: 1 },
+  { 
+    unique: true, 
+    partialFilterExpression: { type: 'ADVANCE' } 
+  }
+);
+
+// Performance index for ledger history and getLastWithdrawal
+ledgerEntrySchema.index({ userId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('LedgerEntry', ledgerEntrySchema);
